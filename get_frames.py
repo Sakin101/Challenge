@@ -3,12 +3,12 @@ import torch
 import glob
 import cv2
 import pandas as pd
+import numpy as np
 
 from paths import DATA_PATH, PROCESSED_PATH
 
-videos = glob.glob(DATA_PATH + '/videos/*')
-labels = glob.glob(DATA_PATH + '/labels/*/frame.csv')
-
+videos = sorted(glob.glob(DATA_PATH + '/videos/*'))
+labels = sorted(glob.glob(DATA_PATH + '/labels/*/frame.csv'))
 
 def get_data(videos, labels):
     inputs = torch.zeros(0, 3, 224, 224)
@@ -18,9 +18,26 @@ def get_data(videos, labels):
         vcap = cv2.VideoCapture(video)
         for i in range(30*90):
             ret, frame = vcap.read()
+
+            if i%150 != 0:
+                continue
+
             if not ret:
                 print("Can't receive frame (stream end?). Exiting ...")
                 break
+
+            # h,w,d = frame.shape
+            # for i in range(w):
+            #     if np.mean(frame[:,i,:]) > 16:
+            #         print(i, np.mean(frame[:,i,:]))
+            #         break
+            # for j in range(w-1,0,-1):
+            #     if np.mean(frame[:,j,:]) > 16:
+            #         print(j, np.mean(frame[:,j,:]))
+            #         break
+            # if i < j:
+            #     frame = frame[:,i:j+1,:].copy()
+
             frame = cv2.resize(frame, dsize=(224, 224))
 
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

@@ -13,4 +13,4 @@
 module load gcc/10.4.0 miniconda3/4.10.3
 conda activate dl
 
-python analyse.py
+python main.py
