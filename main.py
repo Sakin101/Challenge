@@ -6,7 +6,9 @@ import cv2
 import pandas as pd
 import numpy as np
 import os
+from sklearn.model_selection import train_test_split
 
+from evaluate import evaluate_map
 from paths import MODEL_PATH, PROCESSED_PATH
 
 import torchvision.models as models
@@ -31,7 +33,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, i):
         if self.transform is not None:
-            self,inputs[i], self.outputs[i] = self.transform(self.inputs[i], self.outputs[i])
+            self.inputs[i], self.outputs[i] = self.transform(self.inputs[i], self.outputs[i])
 
         return self.inputs[i], self.outputs[i]
 
@@ -39,20 +41,48 @@ def transform(inputs, outputs):
     if np.random.random() < 0.5:
         inputs = torch.flip(inputs, [2])
 
+    # h = 50
+
+    # noise = torch.randn((1, h, h)).to(device)/7
+    # i = np.random.randint(0, 224-h)
+    # j = np.random.randint(0, 224-h)
+    # t[:,i:i+h, j:j+h] += noise
+
+    # noise = torch.randn((1, h, h)).to(device)/7
+    # i = np.random.randint(0, 224-h)
+    # j = np.random.randint(0, 224-h)
+    # t[:,i:i+h, j:j+h] += noise
+
+    # noise = torch.randn((1, h, h)).to(device)/7
+    # i = np.random.randint(0, 224-h)
+    # j = np.random.randint(0, 224-h)
+    # t[:,i:i+h, j:j+h] += noise
+
     # num_of_rotations = np.random.randint(-1, 2)
     # inputs = torch.rot90(inputs, k=num_of_rotations, dims=[1, 2])
 
     return inputs, outputs
 
-dataset = Dataset(inputs, outputs)
+def get_train_val_loader(inputs, outputs):
+    X_train, X_test, y_train, y_test= train_test_split(inputs, outputs, train_size=0.8, 
+                                                    random_state=None, 
+                                                    shuffle=True, stratify=outputs)
 
-train_size = int(0.8 * len(dataset))
-test_size = len(dataset) - train_size
-train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+    print("Class distribution of train set")
+    print(y_train.sum(dim=0), y_train.size(0))
+    print()
+    print("Class distribution of test set")
+    print(y_test.sum(dim=0), y_test.size(0))
 
-train_dataset.transform=transform
-train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    train_dataset = Dataset(X_train, y_train, transform=transform)
+    test_dataset = Dataset(X_test, y_test)
+
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+    return train_dataloader, test_dataloader
+
+train_dataloader, test_dataloader = get_train_val_loader(inputs, outputs)
 
 layers = list(resnet.children())[:-1]
 layers.append(torch.nn.Flatten())
@@ -75,13 +105,13 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn):
 
         # print(loss.item())
 
-def save_model(model, accuracy, path=MODEL_PATH, identifier=''):
+def save_model(model, val_map, path=MODEL_PATH, identifier=''):
     if not os.path.exists(path):
         os.mkdir(path)
     torch.save(model.state_dict(), 
         os.path.join(
             path,
-            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-Accuracy-{accuracy}.pth",
+            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-val-map-{val_map}.pth",
         ),
     )
 
@@ -105,9 +135,13 @@ for i in range(NUM_EPOCHS):
 
             n += y.size(0)
 
+    val_map, map_per_label= evaluate_map(model, test_dataloader, 'cuda:0')
+    print(f"Epoch {i} | validation mAP: {val_map}")
+    print(map_per_label)
 
-    accuracy = torch.mean(correct)
-    print(i, (correct/n).data)
+    accuracy = torch.mean(correct/n)
+    print(i, (correct/n).data, '\n')
+
     if i % 5 == 0:
-        save_model(model, accuracy, MODEL_PATH, 'resnext-bce')
+        save_model(model, val_map, MODEL_PATH, 'resnext')
 
