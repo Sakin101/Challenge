@@ -12,7 +12,18 @@ from evaluate import evaluate_map
 from paths import MODEL_PATH, PROCESSED_PATH
 
 import torchvision.models as models
-resnet = models.resnext101_32x8d(weights=models.ResNeXt101_32X8D_Weights.DEFAULT)
+
+resnet = models.resnet50()
+
+def load_model(filename):
+    model_dict = torch.load(filename)
+    resnet.load_state_dict(model_dict)
+
+load_model(MODEL_PATH+'/2024-06-22@12-35-03-resnet-c-loss-0.03417330506656851.pth')
+
+last_dim = resnet.fc.weight.shape[1]
+resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
+model = resnet
 
 NUM_EPOCHS = 40
 BATCH_SIZE = 32
@@ -83,11 +94,6 @@ def get_train_val_loader(inputs, outputs):
     return train_dataloader, test_dataloader
 
 train_dataloader, test_dataloader = get_train_val_loader(inputs, outputs)
-
-layers = list(resnet.children())[:-1]
-layers.append(torch.nn.Flatten())
-layers.append(torch.nn.Linear(in_features=2048, out_features=3))
-model = torch.nn.Sequential(*layers)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

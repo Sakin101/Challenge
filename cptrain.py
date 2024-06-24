@@ -1,3 +1,7 @@
+import os
+import datetime
+from paths import MODEL_PATH
+
 import torch
 import pickle
 
@@ -7,34 +11,40 @@ import moco.loader
 import moco.builder
 
 import torch.nn as nn
+import numpy as np
 
 with open('./videos/inputs', 'rb') as f:
-    inputs = (pickle.load(f))[:1024]
+    inputs = (pickle.load(f))
 
-BATCH_SIZE=128
-NUM_EPOCHS=5
+BATCH_SIZE=256
+NUM_EPOCHS=3
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, transform):
+    def __init__(self, transform, group_size):
         self.inputs = torch.tensor(inputs, dtype=torch.uint8)
         self.transform = transform
+        self.group_size = group_size
+        assert(90*5%group_size == 0)
 
     def __len__(self):
-        return len(self.inputs)
+        return len(self.inputs)//self.group_size
 
     def __getitem__(self, i):
-        return self.transform(self.inputs[i])
+        key   = self.inputs[i//self.group_size + np.random.randint(0, self.group_size)]
+        value = self.inputs[i//self.group_size + np.random.randint(0, self.group_size)]
+
+        return self.transform(key), self.transform(value)
 
 normalize = v2.Normalize(
     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
 )
 # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
 augmentation = [
-    v2.RandomResizedCrop(224, scale=(0.2, 1.0)),
+    v2.RandomResizedCrop(224, scale=(0.3, 1.0)),
     v2.RandomApply(
-        [v2.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
+        [v2.ColorJitter(0.3, 0.2, 0.25, 0.1)], p=0.8  # not strengthened
     ),
-    v2.RandomGrayscale(p=0.2),
+    # v2.RandomGrayscale(p=0.2),
     v2.ToPILImage(),
     v2.RandomApply([moco.loader.GaussianBlur([0.1, 2.0])], p=0.5),
     v2.RandomHorizontalFlip(),
@@ -42,48 +52,50 @@ augmentation = [
     normalize,
 ]
 
-train_dataset = Dataset(transform=moco.loader.TwoCropsTransform(v2.Compose(augmentation)))
+train_dataset = Dataset(transform=v2.Compose(augmentation), group_size=5)
 train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
 import torchvision.models as models
 
-mlp_hidden_dim=1024
 key_dim=128
-dictionary_size=65536
+dictionary_size=8192
 device='cuda'
 
 resnet = models.resnet50()
-last_layer = list(resnet.children())[-1]
-avg_pool_dim = last_layer.weight.shape[1]
-print(avg_pool_dim)
+out_dim = resnet.fc.weight.shape[0]
 
-layers = list(resnet.children())[:-1]
-layers.append(torch.nn.Flatten())
+encoder = torch.nn.Sequential(
+    resnet,
+    nn.ReLU(),
+    nn.Linear(in_features=out_dim, out_features=key_dim)
+)
 
-layers.extend(
-            [
-            nn.Linear(in_features=avg_pool_dim, out_features=mlp_hidden_dim), 
-            nn.ReLU(), 
-            nn.Sequential(nn.Linear(in_features=mlp_hidden_dim, out_features=key_dim))
-            ]
-        )
 
-encoder = torch.nn.Sequential(*layers)
+# vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+# last_layer = list(vit.children())[-1].head
+# last_dim = last_layer.weight.shape[0]
+
+# print(last_dim)
+
+# encoder = torch.nn.Sequential(
+#     vit,
+#     nn.ReLU(),
+#     nn.Linear(in_features=last_dim, out_features=key_dim)
+# )
 
 model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0.07)
-a = torch.randn((3, 3, 224, 224))
-b = model.encoder_q(a)
-print(b.grad_fn)
+optimizer = torch.optim.Adam(params=[p for p in model.parameters() if p.requires_grad], lr=1e-4)
 
-optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-5)
-
+model= nn.DataParallel(model)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
 
 def train_one_epoch(model, criterion, optimizer, train_dataloader):
     model.train()
-    for q, k in train_dataloader:
+    total_loss = 0
+    n = 0
+    for i, (q, k) in enumerate(train_dataloader):
         q, k = q.to(device), k.to(device)
         logits, targets = model(q, k)
         loss = criterion(logits, targets)
@@ -91,7 +103,27 @@ def train_one_epoch(model, criterion, optimizer, train_dataloader):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        print(loss.item())
+        total_loss += loss.detach().item()
+        n += q.size(0)
+
+        # if i % ((len(train_dataset)//BATCH_SIZE)//5) == 0:
+        print(i, total_loss/n)
+    
+    loss = total_loss/n
+    print(loss)
+    return loss
+
+def save_model(model, loss, path=MODEL_PATH, identifier=''):
+    if not os.path.exists(path):
+        os.mkdir(path)
+    torch.save(model.state_dict(), 
+        os.path.join(
+            path,
+            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-loss-{loss}.pth",
+        ),
+    )
 
 for epoch in range(NUM_EPOCHS):
-    train_one_epoch(model, criterion, optimizer, train_dataloader)
+    loss = train_one_epoch(model, criterion, optimizer, train_dataloader)
+
+save_model(resnet, loss, MODEL_PATH, 'resnet-c')
