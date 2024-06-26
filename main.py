@@ -23,7 +23,7 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    # load_model(MODEL_PATH+'/2024-06-25@11-21-46-resnet-ct-ptinit-loss-0.02548273964119809.pth')
+    load_model(MODEL_PATH+'/2024-06-26@16-01-57-resnet+mlp-ct-loss-0.015230147587898814.pth')
 
     last_dim = resnet.fc.weight.shape[1]
     resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
@@ -46,6 +46,9 @@ with open(PROCESSED_PATH+'/inputs', 'rb') as f:
 with open(PROCESSED_PATH+'/outputs', 'rb') as f:
     outputs = pickle.load(f)
 
+inputs = torch.tensor(inputs, dtype=torch.uint8)
+outputs = torch.tensor(outputs, dtype=torch.uint8)
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, inputs, outputs, transform=None):
         self.inputs, self.outputs = inputs, outputs
@@ -55,7 +58,7 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.inputs)
 
     def __getitem__(self, i):
-        x = torch.tensor(self.inputs[i], dtype=torch.float32)/255
+        x = self.inputs[i]
         if self.transform is not None:
             x = self.transform(x)
 
@@ -65,29 +68,44 @@ normalize = v2.Normalize(
     mean=[0.3736, 0.2172, 0.2071], std=[0.2576, 0.20095, 0.1949]
 )
 
-transform_train = v2.Compose(
-    [
+transform_train = v2.Compose([
+    # v2.RandomResizedCrop(224, scale=(0.2, 1.0)),
+    # v2.RandomApply(
+    #     [v2.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
+    # ),
+    # v2.RandomGrayscale(p=0.2),
     v2.RandomHorizontalFlip(),
+    v2.ToDtype(dtype=torch.float32, scale=True),
+    normalize,
+])
+
+transform_test = v2.Compose(
+    [
+    v2.ToDtype(dtype=torch.float32, scale=True),
     normalize
     ]
 )
 
-transform_test = v2.Compose(
-    [
-    normalize
-    ]
-)
+NUM_OF_VIDS = len(inputs)//18
+
+print(NUM_OF_VIDS)
+
+inputs = inputs.view(NUM_OF_VIDS, 18, 3, 224, 224)
+outputs = outputs.view(NUM_OF_VIDS, 18 * 3)
 
 def get_train_val_loader(inputs, outputs):
     X_train, X_test, y_train, y_test= train_test_split(inputs, outputs, train_size=0.8, 
                                                     random_state=None, 
                                                     shuffle=True) #, stratify=outputs)
 
-    print("Class distribution of train set")
-    print(y_train.sum(dim=0), y_train.size(0))
-    print()
-    print("Class distribution of test set")
-    print(y_test.sum(dim=0), y_test.size(0))
+    train_length = len(X_train)
+    test_length = len(X_test)
+
+    X_train = X_train.view((train_length*18), 3, 224, 224)
+    X_test = X_test.view((test_length*18), 3, 224, 224)
+
+    y_train = y_train.view((train_length*18), 3)
+    y_test = y_test.view((test_length*18), 3)
 
     train_dataset = Dataset(X_train, y_train, transform=transform_train)
     test_dataset = Dataset(X_test, y_test, transform=transform_test)

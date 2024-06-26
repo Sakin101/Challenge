@@ -14,26 +14,35 @@ from paths import MODEL_PATH, PROCESSED_PATH
 
 import torchvision.models as models
 
-resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+MODEL = 'resnext'
 
-def load_model(filename):
-    model_dict = torch.load(filename)
-    resnet.load_state_dict(model_dict)
+if MODEL == 'resnet':
+    resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-load_model(MODEL_PATH+'/2024-06-25@20-08-00-resnet-ct-ptinit-loss-0.025519938849401277.pth')
+    def load_model(filename):
+        model_dict = torch.load(filename)
+        resnet.load_state_dict(model_dict)
 
-last_dim = resnet.fc.weight.shape[1]
-resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
+    load_model(MODEL_PATH+'/2024-06-26@14-45-10-resnet-ct-ptinit-loss-0.020579528414690105.pth')
 
-model = resnet
+    last_dim = resnet.fc.weight.shape[1]
+    resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
+    model = resnet
+elif MODEL == 'resnext':
+    resnext = models.resnext101_32x8d(weights=models.ResNeXt101_32X8D_Weights.DEFAULT)
 
-# vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
-# last_layer = list(vit.children())[-1].head
-# last_dim = last_layer.weight.shape[1]
-# vit.heads = torch.nn.Linear(in_features=last_dim, out_features = 3)
+    last_dim = resnext.fc.weight.shape[1]
+    resnext.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
-# model = vit
+    model = resnext
+elif MODEL == 'vit':
+    vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+    last_layer = list(vit.children())[-1].head
+    last_dim = last_layer.weight.shape[1]
+    vit.heads = torch.nn.Linear(in_features=last_dim, out_features = 3)
+
+    model = vit
 
 NUM_EPOCHS = 40
 BATCH_SIZE = 32
@@ -44,6 +53,9 @@ with open(PROCESSED_PATH+'/inputs', 'rb') as f:
 with open(PROCESSED_PATH+'/outputs', 'rb') as f:
     outputs = pickle.load(f)
 
+inputs = torch.tensor(inputs, dtype=torch.uint8)
+outputs = torch.tensor(outputs, dtype=torch.uint8)
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, inputs, outputs, transform=None):
         self.inputs, self.outputs = inputs, outputs
@@ -53,7 +65,7 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.inputs)
 
     def __getitem__(self, i):
-        x = torch.tensor(self.inputs[i], dtype=torch.float32)/255
+        x = self.inputs[i]
         if self.transform is not None:
             x = self.transform(x)
 
@@ -63,29 +75,44 @@ normalize = v2.Normalize(
     mean=[0.3736, 0.2172, 0.2071], std=[0.2576, 0.20095, 0.1949]
 )
 
-transform_train = v2.Compose(
-    [
+transform_train = v2.Compose([
+    # v2.RandomResizedCrop(224, scale=(0.2, 1.0)),
+    # v2.RandomApply(
+    #     [v2.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
+    # ),
+    # v2.RandomGrayscale(p=0.2),
     v2.RandomHorizontalFlip(),
+    v2.ToDtype(dtype=torch.float32, scale=True),
+    normalize,
+])
+
+transform_test = v2.Compose(
+    [
+    v2.ToDtype(dtype=torch.float32, scale=True),
     normalize
     ]
 )
 
-transform_test = v2.Compose(
-    [
-    normalize
-    ]
-)
+NUM_OF_VIDS = len(inputs)//18
+
+print(NUM_OF_VIDS)
+
+inputs = inputs.view(NUM_OF_VIDS, 18, 3, 224, 224)
+outputs = outputs.view(NUM_OF_VIDS, 18 * 3)
 
 def get_train_val_loader(inputs, outputs):
     X_train, X_test, y_train, y_test= train_test_split(inputs, outputs, train_size=0.8, 
                                                     random_state=None, 
-                                                    shuffle=True, stratify=outputs)
+                                                    shuffle=True) #, stratify=outputs)
 
-    print("Class distribution of train set")
-    print(y_train.sum(dim=0), y_train.size(0))
-    print()
-    print("Class distribution of test set")
-    print(y_test.sum(dim=0), y_test.size(0))
+    train_length = len(X_train)
+    test_length = len(X_test)
+
+    X_train = X_train.view((train_length*18), 3, 224, 224)
+    X_test = X_test.view((test_length*18), 3, 224, 224)
+
+    y_train = y_train.view((train_length*18), 3)
+    y_test = y_test.view((test_length*18), 3)
 
     train_dataset = Dataset(X_train, y_train, transform=transform_train)
     test_dataset = Dataset(X_test, y_test, transform=transform_test)
@@ -134,8 +161,8 @@ optimizer = torch.optim.Adam(params=model.parameters())
 loss_fn = torch.nn.BCEWithLogitsLoss()
 
 
-overall_labels = np.zeros((350*18, 3), dtype=np.uint8)
-overall_predictions = np.zeros((350*18, 3))
+overall_labels = np.zeros((len(test_dataloader.dataset), 3), dtype=np.uint8)
+overall_predictions = np.zeros((len(test_dataloader.dataset), 3))
 
 for i in range(NUM_EPOCHS):
     loss = train_one_epoch(model, train_dataloader, optimizer, loss_fn)
@@ -152,7 +179,7 @@ for i in range(NUM_EPOCHS):
             overall_predictions[j:j+y.size(0)] = torch.nn.functional.sigmoid(y_pred).cpu().numpy()
 
             j+=y.size(0)
-
+    assert(j == len(test_dataloader.dataset))
     metrics = compute_overall_metrics(overall_labels, overall_predictions)
     print(f"Epoch {i+1} Training Loss {loss}")
     print(metrics)

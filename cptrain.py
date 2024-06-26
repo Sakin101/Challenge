@@ -17,7 +17,7 @@ with open('./videos/inputs', 'rb') as f:
     inputs = (pickle.load(f))
 
 BATCH_SIZE=256
-NUM_EPOCHS=9
+NUM_EPOCHS=10
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, transform, group_size):
@@ -62,44 +62,66 @@ key_dim=128
 dictionary_size=8192
 device='cuda'
 
-# resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+MODEL = 'resnext'
 
-# def load_model(filename):
-#     model_dict = torch.load(filename)
-#     resnet.load_state_dict(model_dict)
+if MODEL == 'resnet':
+    resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-# load_model(MODEL_PATH+'/2024-06-25@11-21-46-resnet-ct-ptinit-loss-0.02548273964119809.pth')
+    def load_model(filename):
+        model_dict = torch.load(filename)
+        resnet.load_state_dict(model_dict)
 
-# for name, param in resnet.named_parameters():
-#     if 'bn' in name:
-#         param.requires_grad = False
+    load_model(MODEL_PATH+'/2024-06-26@14-45-10-resnet-ct-ptinit-loss-0.020579528414690105.pth')
 
-# out_dim = resnet.fc.weight.shape[0]
+    for name, param in resnet.named_parameters():
+        if 'bn' in name:
+            param.requires_grad = False
 
-# encoder = torch.nn.Sequential(
-#     resnet,
-#     nn.ReLU(),
-#     nn.Linear(in_features=out_dim, out_features=key_dim)
-# )
+    out_dim = resnet.fc.weight.shape[0]
 
+    encoder = torch.nn.Sequential(
+        resnet,
+        nn.ReLU(),
+        nn.Linear(in_features=out_dim, out_features=key_dim)
+    )
+elif MODEL == 'resnext':
+    resnext = models.resnext101_32x8d(weights=models.ResNeXt101_32X8D_Weights.DEFAULT)
 
-vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
-last_layer = list(vit.children())[-1].head
-last_dim = last_layer.weight.shape[0]
+    def load_model(filename):
+        model_dict = torch.load(filename)
+        resnext.load_state_dict(model_dict)
 
-print(last_dim)
+    # load_model(MODEL_PATH+'')
 
-encoder = torch.nn.Sequential(
-    vit,
-    nn.ReLU(),
-    nn.Linear(in_features=last_dim, out_features=key_dim)
-)
+    for name, param in resnext.named_parameters():
+        if 'bn' in name:
+            param.requires_grad = False
+
+    out_dim = resnext.fc.weight.shape[0]
+
+    encoder = torch.nn.Sequential(
+        resnext,
+        nn.ReLU(),
+        nn.Linear(in_features=out_dim, out_features=key_dim)
+    )
+elif MODEL == 'vit':
+    vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+    last_layer = list(vit.children())[-1].head
+    last_dim = last_layer.weight.shape[0]
+
+    print(last_dim)
+
+    encoder = torch.nn.Sequential(
+        vit,
+        nn.ReLU(),
+        nn.Linear(in_features=last_dim, out_features=key_dim)
+    )
 
 model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0.07)
 
 # optimizer = torch.optim.Adam(params=[p for p in model.parameters() if p.requires_grad], lr=1e-4)
 optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
-                                lr=3e-2,
+                                lr=7e-2,
                                 momentum=0.9,
                                 weight_decay=1e-4)
 
@@ -116,25 +138,32 @@ def train_one_epoch(model, criterion, optimizer, train_dataloader):
     model.train()
     total_loss = 0
     n = 0
+    total_accuracy = 0
     for i, (q, k) in enumerate(train_dataloader):
         q, k = q.to(device), k.to(device)
         logits, targets = model(q, k)
         loss = criterion(logits, targets)
 
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        max_predictions = torch.argmax(logits, dim=1)
+        accuracy = (max_predictions == targets).sum().item()
+
+        total_accuracy += accuracy
+
         total_loss += loss.detach().item()
         n += q.size(0)
 
-        # if i % ((len(train_dataset)//BATCH_SIZE)//5) == 0:
-        print(i, total_loss/n)
+        print(i, total_loss/n, total_accuracy/n)
     
     lr_scheduler.step()
 
     loss = total_loss/n
-    print(loss)
-    return loss
+    print(loss, total_accuracy/n)
+    return loss, total_accuracy/n
 
 def save_model(model, loss, path=MODEL_PATH, identifier=''):
     if not os.path.exists(path):
@@ -147,7 +176,13 @@ def save_model(model, loss, path=MODEL_PATH, identifier=''):
     )
 
 for epoch in range(NUM_EPOCHS):
-    loss = train_one_epoch(model, criterion, optimizer, train_dataloader)
+    loss, accuracy = train_one_epoch(model, criterion, optimizer, train_dataloader)
 
-# save_model(resnet, loss, MODEL_PATH, 'resnet-ct-ptinit')
-save_model(vit, loss, MODEL_PATH, 'vit-ct-ptinit')
+if MODEL == 'resnet':
+    save_model(resnet, loss, MODEL_PATH, 'resnet-ct-ptinit')
+elif MODEL == 'vit':
+    save_model(vit, loss, MODEL_PATH, 'vit-ct-ptinit')
+elif MODEL == 'resnext':
+    save_model(resnext, loss, MODEL_PATH, 'resnext-ct-ptinit')
+
+save_model(encoder, loss, MODEL_PATH, MODEL + '+mlp-ct')
