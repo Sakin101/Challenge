@@ -13,11 +13,13 @@ import moco.builder
 import torch.nn as nn
 import numpy as np
 
-with open('./videos/inputs', 'rb') as f:
-    inputs = (pickle.load(f))
 
 BATCH_SIZE=256
-NUM_EPOCHS=10
+NUM_EPOCHS=20
+GROUP_SIZE=3
+
+with open('./videos/inputs', 'rb') as f:
+    inputs = (pickle.load(f))
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, transform, group_size):
@@ -53,7 +55,7 @@ augmentation = [
     normalize,
 ]
 
-train_dataset = Dataset(transform=v2.Compose(augmentation), group_size=5)
+train_dataset = Dataset(transform=v2.Compose(augmentation), group_size=GROUP_SIZE)
 train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
 import torchvision.models as models
@@ -62,16 +64,17 @@ key_dim=128
 dictionary_size=8192
 device='cuda'
 
-MODEL = 'resnext'
+MODEL = 'resnet'
 
 if MODEL == 'resnet':
     resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-    def load_model(filename):
+    def load_model(model, filename):
         model_dict = torch.load(filename)
-        resnet.load_state_dict(model_dict)
+        model.load_state_dict(model_dict)
+        return model
 
-    load_model(MODEL_PATH+'/2024-06-26@14-45-10-resnet-ct-ptinit-loss-0.020579528414690105.pth')
+    # resnet = load_model(resnet, MODEL_PATH+'/2024-06-26@16-01-57-resnet-ct-ptinit-loss-0.015230147587898814.pth')
 
     for name, param in resnet.named_parameters():
         if 'bn' in name:
@@ -84,6 +87,9 @@ if MODEL == 'resnet':
         nn.ReLU(),
         nn.Linear(in_features=out_dim, out_features=key_dim)
     )
+
+    encoder = load_model(encoder, MODEL_PATH+'/2024-06-26@22-34-14-resnet+mlp-ct-loss-0.009877337941753805.pth')
+
 elif MODEL == 'resnext':
     resnext = models.resnext101_32x8d(weights=models.ResNeXt101_32X8D_Weights.DEFAULT)
 
@@ -121,13 +127,15 @@ model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0
 
 # optimizer = torch.optim.Adam(params=[p for p in model.parameters() if p.requires_grad], lr=1e-4)
 optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
-                                lr=7e-2,
+                                lr=0.04,
                                 momentum=0.9,
                                 weight_decay=1e-4)
 
 lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                            T_max=3,
-                                                            eta_min=5e-7)
+                                                            T_max=4,
+                                                            eta_min=1e-6)
+
+# lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9, last_epoch=-1)
 
 model= nn.DataParallel(model)
 model = model.to(device)
@@ -171,18 +179,18 @@ def save_model(model, loss, path=MODEL_PATH, identifier=''):
     torch.save(model.state_dict(), 
         os.path.join(
             path,
-            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-loss-{loss}.pth",
+            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-accuracy-{loss}.pth",
         ),
     )
 
 for epoch in range(NUM_EPOCHS):
     loss, accuracy = train_one_epoch(model, criterion, optimizer, train_dataloader)
 
-if MODEL == 'resnet':
-    save_model(resnet, loss, MODEL_PATH, 'resnet-ct-ptinit')
-elif MODEL == 'vit':
-    save_model(vit, loss, MODEL_PATH, 'vit-ct-ptinit')
-elif MODEL == 'resnext':
-    save_model(resnext, loss, MODEL_PATH, 'resnext-ct-ptinit')
+    save_model(encoder, accuracy, MODEL_PATH, MODEL + '+mlp-ct')
 
-save_model(encoder, loss, MODEL_PATH, MODEL + '+mlp-ct')
+if MODEL == 'resnet':
+    save_model(resnet, accuracy, MODEL_PATH, 'resnet-ct-ptinit')
+elif MODEL == 'vit':
+    save_model(vit, accuracy, MODEL_PATH, 'vit-ct-ptinit')
+elif MODEL == 'resnext':
+    save_model(resnext, accuracy, MODEL_PATH, 'resnext-ct-ptinit')

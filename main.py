@@ -23,7 +23,7 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    load_model(MODEL_PATH+'/2024-06-26@16-01-57-resnet+mlp-ct-loss-0.015230147587898814.pth')
+    load_model(MODEL_PATH+'/2024-06-26@22-34-14-resnet-ct-ptinit-loss-0.009877337941753805.pth')
 
     last_dim = resnet.fc.weight.shape[1]
     resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
@@ -37,7 +37,7 @@ else:
 
     model = vit
 
-NUM_EPOCHS = 40
+NUM_EPOCHS = 60
 BATCH_SIZE = 32
 
 with open(PROCESSED_PATH+'/inputs', 'rb') as f:
@@ -95,7 +95,7 @@ outputs = outputs.view(NUM_OF_VIDS, 18 * 3)
 
 def get_train_val_loader(inputs, outputs):
     X_train, X_test, y_train, y_test= train_test_split(inputs, outputs, train_size=0.8, 
-                                                    random_state=None, 
+                                                    random_state=1, 
                                                     shuffle=True) #, stratify=outputs)
 
     train_length = len(X_train)
@@ -177,6 +177,6 @@ for i in range(NUM_EPOCHS):
     print(f"Epoch {i+1} Training Loss {loss}")
     print(metrics)
 
-    # if i % 5 == 0:
-    #     save_model(model, metrics["mAP"], MODEL_PATH, 'resnet-base')
+    if i % 5 == 0:
+        save_model(model, metrics["mAP"], MODEL_PATH, 'resnet-60-9-3')
 
