@@ -1,68 +1,53 @@
 import pickle
-import torch
 import glob
 import cv2
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from paths import DATA_PATH, PROCESSED_PATH
 
-videos = sorted(glob.glob(DATA_PATH + '/videos/*'))
-labels = sorted(glob.glob(DATA_PATH + '/labels/*/frame.csv'))
+NUM_OF_VIDS = 200
+FRAMES_PER_VID = 18
+
+videos = sorted(glob.glob(DATA_PATH + '/videos/*'))[0:NUM_OF_VIDS]
+labels = sorted(glob.glob(DATA_PATH + '/labels/*/frame.csv'))[0:NUM_OF_VIDS]
 
 def get_data(videos, labels):
-    inputs = torch.zeros(0, 3, 224, 224)
-    outputs = []
-    for video, label in zip(videos, labels):
-        print(video)
+    inputs = np.zeros((NUM_OF_VIDS * FRAMES_PER_VID, 3, 224, 224), dtype=np.uint8)
+    outputs = np.zeros((NUM_OF_VIDS * FRAMES_PER_VID, 3), dtype=np.uint8)
+    x = 0
+    for vid_index, (video, label) in enumerate(zip(videos, labels)):
         vcap = cv2.VideoCapture(video)
-        for i in range(30*90):
+        for i in range(0, 30*90, 150):
+            vcap.set(cv2.CAP_PROP_POS_FRAMES, i)
             ret, frame = vcap.read()
-
-            if i%150 != 0:
-                continue
-
+            # if i % 150 != 0:
+            #     continue
             if not ret:
                 print("Can't receive frame (stream end?). Exiting ...")
                 break
 
-            # h,w,d = frame.shape
-            # for i in range(w):
-            #     if np.mean(frame[:,i,:]) > 16:
-            #         print(i, np.mean(frame[:,i,:]))
-            #         break
-            # for j in range(w-1,0,-1):
-            #     if np.mean(frame[:,j,:]) > 16:
-            #         print(j, np.mean(frame[:,j,:]))
-            #         break
-            # if i < j:
-            #     frame = frame[:,i:j+1,:].copy()
-
             frame = cv2.resize(frame, dsize=(224, 224))
-
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            t = torch.tensor(frame, dtype=torch.float32)
-            t = t/255*2-1
-            t = torch.permute(t, (2, 0, 1))
-            if i % 150 == 0:
-                inputs = torch.cat((inputs, t.unsqueeze(0)), dim=0)
+            frame = np.transpose(frame, (2, 0, 1))
+            inputs[x] = frame.astype(np.uint8)
+            x+=1
 
         df = pd.read_csv(label)
 
-        for index, row in df.iterrows():
+        for j, row in df.iterrows():
             x1 = 1 if row.iloc[1:4].sum() > 1 else 0
             x2 = 1 if row.iloc[4:7].sum() > 1 else 0
             x3 = 1 if row.iloc[7:10].sum() > 1 else 0
-            outputs.append([x1, x2, x3])
-
-    outputs = torch.tensor(outputs, dtype=torch.long)
+            
+            outputs[vid_index*18+j] = [x1, x2, x3]
 
     with open(PROCESSED_PATH+'/inputs', 'wb') as f:
         pickle.dump(inputs, f)
 
-    with open(PROCESSED_PATH+'/outputs', 'wb') as f:
-        pickle.dump(outputs, f)
+    # with open(PROCESSED_PATH+'/outputs', 'wb') as f:
+    #     pickle.dump(outputs, f)
 
     return inputs, outputs
 
-get_data(videos, labels)
+inputs, labels = get_data(videos, labels)

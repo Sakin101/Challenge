@@ -1,31 +1,31 @@
-import torch
-from sklearn.metrics import average_precision_score
+"""Define metrics for the CVS challenge. See compute_overall_metrics for specific types of metrics."""
+from typing import Dict
+
 import numpy as np
-from tqdm import tqdm
-import torch.nn as nn
+from sklearn.metrics import (accuracy_score, average_precision_score,
+                             brier_score_loss, f1_score)
 
-def evaluate_map(model, dataloader, device):
-    model.eval()  # Set the model to evaluation mode
-    all_labels = []
-    all_preds = []
-    with torch.no_grad():
-        for batch_idx, (images, labels) in (enumerate(dataloader)):
-            images = images.to(device)
-            labels = labels.to(device)
-            
-            outputs = model(images)
-            preds = torch.sigmoid(outputs)  # Sigmoid to get probabilities
-            
-            all_labels.append(labels.cpu().numpy())
-            all_preds.append(preds.cpu().numpy())
 
-    all_labels = np.concatenate(all_labels, axis=0)
-    all_preds = np.concatenate(all_preds, axis=0)
+def compute_overall_metrics(
+    overall_labels: np.ndarray, overall_confidences: np.array
+) -> Dict:
+    """Compute the metrics for accuracy and uncertainty calibration: f1 score, mean average precision, and accuracy for label accuracy, and Brier score for uncertainty calibration.
 
-    # Calculate average precision for each label
-    ap_per_label = []
-    for i in range(all_labels.shape[1]):
-        ap = average_precision_score(all_labels[:, i], all_preds[:, i])
-        ap_per_label.append(ap)
-    map_score = np.mean(ap_per_label)
-    return map_score, ap_per_label
+    Args:
+        overall_labels (np.ndarray): An Nx3 labels array, where N is the number of samples, with 0 and 1 values. These are the ground truth labels.
+        confidence_aware_labels (np.ndarray): An Nx3 labels array, where N is the number of samples, with 0 and 1 values. These are the ground truth labels.
+        overall_confidences (np.ndarray): An Nx3 labels array, where N is the number of samples, with float values between 0 and 1. These are the model estimates of the label confidences.
+
+    Returns:
+        Dict: includes several metrics, such as F1, mAP, accuracy, and Brier score.
+        For Brier Score: see Brier, Glenn W. 1950. “VERIFICATION OF FORECASTS EXPRESSED IN TERMS OF PROBABILITY.” Monthly Weather Review 78 (1): 1--3.
+    """
+    overall_predicted_labels = overall_confidences>0.5
+    accuracy = accuracy_score(overall_labels, overall_predicted_labels)
+    f1 = f1_score(
+        overall_labels, overall_predicted_labels, average="samples", zero_division=1
+    )  # 'samples' for multi-label setup
+    mAP = average_precision_score(overall_labels, overall_confidences, average="macro")  # 'macro' for unweighted mAP
+    metrics = {"f1": f1, "mAP": mAP, "accuracy": accuracy}
+
+    return metrics

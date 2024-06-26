@@ -14,28 +14,26 @@ from paths import MODEL_PATH, PROCESSED_PATH
 
 import torchvision.models as models
 
-MODEL = 'resnet'
+resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-if MODEL == 'resnet':
-    resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+def load_model(filename):
+    model_dict = torch.load(filename)
+    resnet.load_state_dict(model_dict)
 
-    def load_model(filename):
-        model_dict = torch.load(filename)
-        resnet.load_state_dict(model_dict)
+load_model(MODEL_PATH+'/2024-06-25@20-08-00-resnet-ct-ptinit-loss-0.025519938849401277.pth')
 
-    # load_model(MODEL_PATH+'/2024-06-25@11-21-46-resnet-ct-ptinit-loss-0.02548273964119809.pth')
+last_dim = resnet.fc.weight.shape[1]
+resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
-    last_dim = resnet.fc.weight.shape[1]
-    resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
+model = resnet
 
-    model = resnet
-else:
-    vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
-    last_layer = list(vit.children())[-1].head
-    last_dim = last_layer.weight.shape[1]
-    vit.heads = torch.nn.Linear(in_features=last_dim, out_features = 3)
 
-    model = vit
+# vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+# last_layer = list(vit.children())[-1].head
+# last_dim = last_layer.weight.shape[1]
+# vit.heads = torch.nn.Linear(in_features=last_dim, out_features = 3)
+
+# model = vit
 
 NUM_EPOCHS = 40
 BATCH_SIZE = 32
@@ -81,7 +79,7 @@ transform_test = v2.Compose(
 def get_train_val_loader(inputs, outputs):
     X_train, X_test, y_train, y_test= train_test_split(inputs, outputs, train_size=0.8, 
                                                     random_state=None, 
-                                                    shuffle=True) #, stratify=outputs)
+                                                    shuffle=True, stratify=outputs)
 
     print("Class distribution of train set")
     print(y_train.sum(dim=0), y_train.size(0))
@@ -136,8 +134,8 @@ optimizer = torch.optim.Adam(params=model.parameters())
 loss_fn = torch.nn.BCEWithLogitsLoss()
 
 
-overall_labels = np.zeros((len(test_dataloader.dataset), 3), dtype=np.uint8)
-overall_predictions = np.zeros((len(test_dataloader.dataset), 3))
+overall_labels = np.zeros((350*18, 3), dtype=np.uint8)
+overall_predictions = np.zeros((350*18, 3))
 
 for i in range(NUM_EPOCHS):
     loss = train_one_epoch(model, train_dataloader, optimizer, loss_fn)
@@ -154,7 +152,7 @@ for i in range(NUM_EPOCHS):
             overall_predictions[j:j+y.size(0)] = torch.nn.functional.sigmoid(y_pred).cpu().numpy()
 
             j+=y.size(0)
-    assert(j == len(test_dataloader.dataset))
+
     metrics = compute_overall_metrics(overall_labels, overall_predictions)
     print(f"Epoch {i+1} Training Loss {loss}")
     print(metrics)

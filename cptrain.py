@@ -17,7 +17,7 @@ with open('./videos/inputs', 'rb') as f:
     inputs = (pickle.load(f))
 
 BATCH_SIZE=256
-NUM_EPOCHS=3
+NUM_EPOCHS=9
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, transform, group_size):
@@ -36,15 +36,16 @@ class Dataset(torch.utils.data.Dataset):
         return self.transform(key), self.transform(value)
 
 normalize = v2.Normalize(
-    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    # mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    mean=[0.3736, 0.2172, 0.2071], std=[0.2576, 0.20095, 0.1949]
 )
 # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
 augmentation = [
-    v2.RandomResizedCrop(224, scale=(0.3, 1.0)),
+    v2.RandomResizedCrop(224, scale=(0.2, 1.0)),
     v2.RandomApply(
-        [v2.ColorJitter(0.3, 0.2, 0.25, 0.1)], p=0.8  # not strengthened
+        [v2.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
     ),
-    # v2.RandomGrayscale(p=0.2),
+    v2.RandomGrayscale(p=0.2),
     v2.ToPILImage(),
     v2.RandomApply([moco.loader.GaussianBlur([0.1, 2.0])], p=0.5),
     v2.RandomHorizontalFlip(),
@@ -61,30 +62,50 @@ key_dim=128
 dictionary_size=8192
 device='cuda'
 
-resnet = models.resnet50()
-out_dim = resnet.fc.weight.shape[0]
+# resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-encoder = torch.nn.Sequential(
-    resnet,
-    nn.ReLU(),
-    nn.Linear(in_features=out_dim, out_features=key_dim)
-)
+# def load_model(filename):
+#     model_dict = torch.load(filename)
+#     resnet.load_state_dict(model_dict)
 
+# load_model(MODEL_PATH+'/2024-06-25@11-21-46-resnet-ct-ptinit-loss-0.02548273964119809.pth')
 
-# vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
-# last_layer = list(vit.children())[-1].head
-# last_dim = last_layer.weight.shape[0]
+# for name, param in resnet.named_parameters():
+#     if 'bn' in name:
+#         param.requires_grad = False
 
-# print(last_dim)
+# out_dim = resnet.fc.weight.shape[0]
 
 # encoder = torch.nn.Sequential(
-#     vit,
+#     resnet,
 #     nn.ReLU(),
-#     nn.Linear(in_features=last_dim, out_features=key_dim)
+#     nn.Linear(in_features=out_dim, out_features=key_dim)
 # )
 
+
+vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+last_layer = list(vit.children())[-1].head
+last_dim = last_layer.weight.shape[0]
+
+print(last_dim)
+
+encoder = torch.nn.Sequential(
+    vit,
+    nn.ReLU(),
+    nn.Linear(in_features=last_dim, out_features=key_dim)
+)
+
 model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0.07)
-optimizer = torch.optim.Adam(params=[p for p in model.parameters() if p.requires_grad], lr=1e-4)
+
+# optimizer = torch.optim.Adam(params=[p for p in model.parameters() if p.requires_grad], lr=1e-4)
+optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
+                                lr=3e-2,
+                                momentum=0.9,
+                                weight_decay=1e-4)
+
+lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                            T_max=3,
+                                                            eta_min=5e-7)
 
 model= nn.DataParallel(model)
 model = model.to(device)
@@ -109,6 +130,8 @@ def train_one_epoch(model, criterion, optimizer, train_dataloader):
         # if i % ((len(train_dataset)//BATCH_SIZE)//5) == 0:
         print(i, total_loss/n)
     
+    lr_scheduler.step()
+
     loss = total_loss/n
     print(loss)
     return loss
@@ -126,4 +149,5 @@ def save_model(model, loss, path=MODEL_PATH, identifier=''):
 for epoch in range(NUM_EPOCHS):
     loss = train_one_epoch(model, criterion, optimizer, train_dataloader)
 
-save_model(resnet, loss, MODEL_PATH, 'resnet-c')
+# save_model(resnet, loss, MODEL_PATH, 'resnet-ct-ptinit')
+save_model(vit, loss, MODEL_PATH, 'vit-ct-ptinit')

@@ -5,7 +5,7 @@ import numpy as np
 
 from paths import DATA_PATH, VIDEO_PATH2
 
-NUM_OF_VIDS = 200
+NUM_OF_VIDS = 350
 FRAMES_PER_SEC = 5
 FRAMES_PER_VID = 90 * FRAMES_PER_SEC
 
