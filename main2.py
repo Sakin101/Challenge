@@ -14,7 +14,7 @@ from paths import MODEL_PATH, PROCESSED_PATH
 
 import torchvision.models as models
 
-MODEL = 'resnext'
+MODEL = 'resnet'
 
 if MODEL == 'resnet':
     resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
@@ -23,20 +23,13 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    load_model(MODEL_PATH+'/2024-06-26@14-45-10-resnet-ct-ptinit-loss-0.020579528414690105.pth')
+    load_model(MODEL_PATH+'/2024-06-27@12-08-07-resnet-ct-ptinit-accuracy-0.12929.pth')
 
     last_dim = resnet.fc.weight.shape[1]
     resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
     model = resnet
-elif MODEL == 'resnext':
-    resnext = models.resnext101_32x8d(weights=models.ResNeXt101_32X8D_Weights.DEFAULT)
-
-    last_dim = resnext.fc.weight.shape[1]
-    resnext.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
-
-    model = resnext
-elif MODEL == 'vit':
+else:
     vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
     last_layer = list(vit.children())[-1].head
     last_dim = last_layer.weight.shape[1]
@@ -44,8 +37,8 @@ elif MODEL == 'vit':
 
     model = vit
 
-NUM_EPOCHS = 40
-BATCH_SIZE = 32
+NUM_EPOCHS = 60
+BATCH_SIZE = 16
 
 with open(PROCESSED_PATH+'/inputs', 'rb') as f:
     inputs = pickle.load(f)
@@ -102,7 +95,7 @@ outputs = outputs.view(NUM_OF_VIDS, 18 * 3)
 
 def get_train_val_loader(inputs, outputs):
     X_train, X_test, y_train, y_test= train_test_split(inputs, outputs, train_size=0.8, 
-                                                    random_state=None, 
+                                                    random_state=1, 
                                                     shuffle=True) #, stratify=outputs)
 
     train_length = len(X_train)
@@ -124,7 +117,7 @@ def get_train_val_loader(inputs, outputs):
 
 train_dataloader, test_dataloader = get_train_val_loader(inputs, outputs)
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
 
 def train_one_epoch(model, dataloader, optimizer, loss_fn):
     model.train()
@@ -145,19 +138,19 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn):
 
     return total_loss/n
 
-def save_model(model, val_map, path=MODEL_PATH, identifier=''):
+def save_model(model, val_map, acc, path=MODEL_PATH, identifier=''):
     if not os.path.exists(path):
         os.mkdir(path)
     torch.save(model.state_dict(), 
         os.path.join(
             path,
-            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-val-map-{val_map}.pth",
+            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-val-map-{val_map}-acc-{acc}.pth",
         ),
     )
 
 
 model = model.to(device)
-optimizer = torch.optim.Adam(params=model.parameters())
+optimizer = torch.optim.Adam(params=model.parameters(), lr=2e-4)
 loss_fn = torch.nn.BCEWithLogitsLoss()
 
 
@@ -184,6 +177,5 @@ for i in range(NUM_EPOCHS):
     print(f"Epoch {i+1} Training Loss {loss}")
     print(metrics)
 
-    # if i % 5 == 0:
-    #     save_model(model, metrics["mAP"], MODEL_PATH, 'resnet-base')
+    save_model(model, metrics["mAP"], metrics["accuracy"], MODEL_PATH, 'resnet-60-20-3')
 

@@ -5,6 +5,7 @@ paths.py
 data/
 hard*
 videos/
+test*/
 *2*
 =======
 # READ THIS BEFORE YOU REFACTOR ME

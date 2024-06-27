@@ -23,7 +23,7 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    load_model(MODEL_PATH+'/2024-06-26@22-34-14-resnet-ct-ptinit-loss-0.009877337941753805.pth')
+    load_model(MODEL_PATH+'/2024-06-27@12-08-07-resnet-ct-ptinit-accuracy-0.12929.pth')
 
     last_dim = resnet.fc.weight.shape[1]
     resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
@@ -38,7 +38,7 @@ else:
     model = vit
 
 NUM_EPOCHS = 60
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 
 with open(PROCESSED_PATH+'/inputs', 'rb') as f:
     inputs = pickle.load(f)
@@ -138,19 +138,19 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn):
 
     return total_loss/n
 
-def save_model(model, val_map, path=MODEL_PATH, identifier=''):
+def save_model(model, val_map, acc, path=MODEL_PATH, identifier=''):
     if not os.path.exists(path):
         os.mkdir(path)
     torch.save(model.state_dict(), 
         os.path.join(
             path,
-            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-val-map-{val_map}.pth",
+            f"{datetime.datetime.now().__str__()[:-6].replace(':','-').replace(' ','@')[:-1]}-{identifier}-val-map-{val_map}-acc-{acc}.pth",
         ),
     )
 
 
 model = model.to(device)
-optimizer = torch.optim.Adam(params=model.parameters())
+optimizer = torch.optim.Adam(params=model.parameters(), lr=2e-4)
 loss_fn = torch.nn.BCEWithLogitsLoss()
 
 
@@ -177,6 +177,5 @@ for i in range(NUM_EPOCHS):
     print(f"Epoch {i+1} Training Loss {loss}")
     print(metrics)
 
-    if i % 5 == 0:
-        save_model(model, metrics["mAP"], MODEL_PATH, 'resnet-60-9-3')
+    save_model(model, metrics["mAP"], metrics["accuracy"], MODEL_PATH, 'resnet-60-20-3')
 
