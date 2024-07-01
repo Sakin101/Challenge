@@ -23,7 +23,7 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    load_model(MODEL_PATH+'/2024-06-27@12-08-07-resnet-ct-ptinit-accuracy-0.12929.pth')
+    load_model(MODEL_PATH+'/2024-07-01@11-18-47-resnet-ct-ptinit-accuracy-0.3867827868852459.pth')
 
     last_dim = resnet.fc.weight.shape[1]
     resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
@@ -177,5 +177,5 @@ for i in range(NUM_EPOCHS):
     print(f"Epoch {i+1} Training Loss {loss}")
     print(metrics)
 
-    save_model(model, metrics["mAP"], metrics["accuracy"], MODEL_PATH, 'resnet-60-20-3')
+    # save_model(model, metrics["mAP"], metrics["accuracy"], MODEL_PATH, 'resnet-60-20-3')
 

@@ -15,7 +15,7 @@ import numpy as np
 
 
 BATCH_SIZE=256
-NUM_EPOCHS=9
+NUM_EPOCHS=24
 GROUP_SIZE=5
 
 with open('./videos/inputs', 'rb') as f:
@@ -32,8 +32,8 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.inputs)//self.group_size
 
     def __getitem__(self, i):
-        key   = self.inputs[i//self.group_size + np.random.randint(0, self.group_size)]
-        value = self.inputs[i//self.group_size + np.random.randint(0, self.group_size)]
+        key   = self.inputs[i * self.group_size + np.random.randint(0, self.group_size)]
+        value = self.inputs[i * self.group_size + np.random.randint(0, self.group_size)]
 
         return self.transform(key), self.transform(value)
 
@@ -76,9 +76,9 @@ if MODEL == 'resnet':
 
     # resnet = load_model(resnet, MODEL_PATH+'/2024-06-27@07-51-46-resnet+mlp-ct-accuracy-0.11305712090163934.pth')
 
-    for name, param in resnet.named_parameters():
-        if 'bn' in name:
-            param.requires_grad = False
+    # for name, param in resnet.named_parameters():
+    #     if 'bn' in name:
+    #         param.requires_grad = False
 
     out_dim = resnet.fc.weight.shape[0]
 
@@ -88,7 +88,7 @@ if MODEL == 'resnet':
         nn.Linear(in_features=out_dim, out_features=key_dim)
     )
 
-    encoder = load_model(encoder, MODEL_PATH+'/2024-06-27@09-42-11-resnet+mlp-ct-accuracy-0.12768954918032788.pth')
+    # encoder = load_model(encoder, MODEL_PATH+'/2024-07-01@09-40-27-resnet+mlp-ct-accuracy-0.08180712090163934.pth')
 
 elif MODEL == 'resnext':
     resnext = models.resnext101_32x8d(weights=models.ResNeXt101_32X8D_Weights.DEFAULT)
@@ -131,11 +131,11 @@ optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
                                 momentum=0.9,
                                 weight_decay=1e-4)
 
-# lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-#                                                             T_max=6,
-#                                                             eta_min=1e-6)
+lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                            T_max=6,
+                                                            eta_min=1e-6)
 
-lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=-1)
+# lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=-1)
 
 model= nn.DataParallel(model)
 model = model.to(device)
@@ -194,3 +194,5 @@ elif MODEL == 'vit':
     save_model(vit, accuracy, MODEL_PATH, 'vit-ct-ptinit')
 elif MODEL == 'resnext':
     save_model(resnext, accuracy, MODEL_PATH, 'resnext-ct-ptinit')
+
+save_model(model, accuracy, MODEL_PATH, MODEL + '-full-model')
