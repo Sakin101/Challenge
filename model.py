@@ -1,25 +1,39 @@
-import torch, torch.nn as nn
-import torchvision.models as models
-from torchinfo import summary
-import moco.builder
+import torch
+import torch.distributions.binomial
+import torch.nn as nn
+import torch.nn.functional as F
 
-key_dim = 128
+import numpy as np
 
-vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
-last_layer = list(vit.children())[-1].head
-last_dim = last_layer.weight.shape[0]
+torch.manual_seed(1)
 
-print(last_dim)
+class MultiFrameModel(nn.Module):
+    def __init__(self, backbone, linear_dim, num_of_frames, drop_p=0.4):
+        super().__init__()
+        self.backbone = backbone
+        self.linear = nn.Linear(linear_dim * num_of_frames, 3)
+        self.drop_p = drop_p
 
-encoder = torch.nn.Sequential(
-    vit,
-    nn.ReLU(),
-    nn.Linear(in_features=last_dim, out_features=key_dim)
-)
+        # self.remaining_binomial = torch.distributions.binomial.Binomial(num_of_frames-1, torch.tensor([1-drop_p]))
+    
+    def forward(self, x):
+        B, F, C, H, W = x.shape
 
-mlp_hidden_dim=512
-key_dim=128
-dictionary_size=8192
+        x = x.view(B*F, C, H, W)
+        x = self.backbone(x)
+        x = x.flatten(1)
+        x = x.view(B, F, -1)
+        if self.training:
+            b = torch.bernoulli(torch.ones(B, F-1)*(1-self.drop_p)).to('cuda')
+            x[:,:-1,:] *= b.view(B, F-1, 1).repeat(1, 1, x.shape[2])
+        else:
+            x[:,:-1,:] *= (1-self.drop_p)
+        x = x.view(B, F * x.shape[-1])
+        x = self.linear(x)
 
-model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0.07)
-summary(model, (64, 3, 224, 224))
+        return x
+
+        # num_of_frames_remaining = self.binomial.sample()
+        # indices = torch.ones(B, F-1)
+        # frame_indices = indices.multinomial(num_of_frames_remaining, replacement=False)
+        # frames = 

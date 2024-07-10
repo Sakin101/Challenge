@@ -14,7 +14,15 @@ from paths import MODEL_PATH, PROCESSED_PATH
 
 import torchvision.models as models
 
+from model import MultiFrameModel
+
+torch.manual_seed(1)
+np.random.seed(1)
+
 MODEL = 'resnet'
+MULTIFRAME = False
+NUM_OF_FRAMES = 5
+
 
 if MODEL == 'resnet':
     resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
@@ -23,22 +31,34 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    load_model(MODEL_PATH+'/2024-07-01@11-18-47-resnet-ct-ptinit-accuracy-0.3867827868852459.pth')
+    load_model(MODEL_PATH+'/2024-07-01@09-40-27-resnet-ct-ptinit-accuracy-0.08180712090163934.pth')
 
     last_dim = resnet.fc.weight.shape[1]
-    resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
-    model = resnet
+    if MULTIFRAME:
+        backbone = torch.nn.Sequential(*list(resnet.children())[:-1])
+        model = MultiFrameModel(backbone=backbone, linear_dim=last_dim, num_of_frames=NUM_OF_FRAMES, drop_p=0.7)
+    else:
+        resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
+        model = resnet
+
 else:
     vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+
+    def load_model(filename):
+        model_dict = torch.load(filename)
+        vit.load_state_dict(model_dict)
+
+    load_model(MODEL_PATH+'/2024-07-02@11-03-29-vit-ct-ptinit-accuracy-0.0007364241803278688.pth')
+
     last_layer = list(vit.children())[-1].head
     last_dim = last_layer.weight.shape[1]
     vit.heads = torch.nn.Linear(in_features=last_dim, out_features = 3)
 
     model = vit
 
-NUM_EPOCHS = 60
-BATCH_SIZE = 16
+NUM_EPOCHS = 30
+BATCH_SIZE = 32
 
 with open(PROCESSED_PATH+'/inputs', 'rb') as f:
     inputs = pickle.load(f)
@@ -46,7 +66,17 @@ with open(PROCESSED_PATH+'/inputs', 'rb') as f:
 with open(PROCESSED_PATH+'/outputs', 'rb') as f:
     outputs = pickle.load(f)
 
-inputs = torch.tensor(inputs, dtype=torch.uint8)
+NUM_OF_VIDS=349
+
+inputs = torch.tensor(inputs, dtype=torch.uint8).view(NUM_OF_VIDS, 18 * NUM_OF_FRAMES, 3, 224, 224)
+if MULTIFRAME:
+    inputs = inputs[:, :90-(NUM_OF_FRAMES-1), :, :, :]
+    inputs = torch.concat((inputs[:,0,:,:,:].view(NUM_OF_VIDS, 1, 3, 224, 224).repeat(1, NUM_OF_FRAMES-1, 1, 1, 1), inputs), dim=1)
+else:
+    NUM_OF_FRAMES = 1
+    inputs = inputs[:, 0::5, :, :, :].view(NUM_OF_VIDS, 18, 3, 224, 224)
+print(inputs.shape)
+
 outputs = torch.tensor(outputs, dtype=torch.uint8)
 
 class Dataset(torch.utils.data.Dataset):
@@ -86,11 +116,11 @@ transform_test = v2.Compose(
     ]
 )
 
-NUM_OF_VIDS = len(inputs)//18
+NUM_OF_VIDS = len(inputs)
 
 print(NUM_OF_VIDS)
 
-inputs = inputs.view(NUM_OF_VIDS, 18, 3, 224, 224)
+inputs = inputs.view(NUM_OF_VIDS, 18*NUM_OF_FRAMES, 3, 224, 224)
 outputs = outputs.view(NUM_OF_VIDS, 18 * 3)
 
 def get_train_val_loader(inputs, outputs):
@@ -101,8 +131,12 @@ def get_train_val_loader(inputs, outputs):
     train_length = len(X_train)
     test_length = len(X_test)
 
-    X_train = X_train.view((train_length*18), 3, 224, 224)
-    X_test = X_test.view((test_length*18), 3, 224, 224)
+    if MULTIFRAME:
+        X_train = X_train.view((train_length*18), NUM_OF_FRAMES, 3, 224, 224)
+        X_test = X_test.view((test_length*18), NUM_OF_FRAMES, 3, 224, 224)
+    else:
+        X_train = X_train.view((train_length*18), 3, 224, 224)
+        X_test = X_test.view((test_length*18), 3, 224, 224)
 
     y_train = y_train.view((train_length*18), 3)
     y_test = y_test.view((test_length*18), 3)
@@ -117,7 +151,7 @@ def get_train_val_loader(inputs, outputs):
 
 train_dataloader, test_dataloader = get_train_val_loader(inputs, outputs)
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cuda'
 
 def train_one_epoch(model, dataloader, optimizer, loss_fn):
     model.train()

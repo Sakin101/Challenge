@@ -15,7 +15,7 @@ import numpy as np
 
 
 BATCH_SIZE=256
-NUM_EPOCHS=24
+NUM_EPOCHS=12
 GROUP_SIZE=5
 
 with open('./videos/inputs', 'rb') as f:
@@ -64,7 +64,7 @@ key_dim=128
 dictionary_size=8192
 device='cuda'
 
-MODEL = 'resnet'
+MODEL = 'vit'
 
 if MODEL == 'resnet':
     resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
@@ -137,7 +137,6 @@ lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
 
 # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=-1)
 
-model= nn.DataParallel(model)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
@@ -186,7 +185,7 @@ def save_model(model, loss, path=MODEL_PATH, identifier=''):
 for epoch in range(NUM_EPOCHS):
     loss, accuracy = train_one_epoch(model, criterion, optimizer, train_dataloader)
 
-    save_model(encoder, accuracy, MODEL_PATH, MODEL + '+mlp-ct')
+save_model(encoder, accuracy, MODEL_PATH, MODEL + '+mlp-ct')
 
 if MODEL == 'resnet':
     save_model(resnet, accuracy, MODEL_PATH, 'resnet-ct-ptinit')

@@ -11,4 +11,4 @@
 module load gcc/10.4.0 miniconda3/4.10.3
 conda activate dl
 
-time python predict.py
+time python get_labels.py

@@ -6,6 +6,8 @@ data/
 hard*
 videos/
 test*/
+cvs_train/
+data_frames/
 *2*
 =======
 # READ THIS BEFORE YOU REFACTOR ME
