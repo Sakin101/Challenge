@@ -34,7 +34,7 @@ last_dim = resnet.fc.weight.shape[1]
 resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
 model = resnet
-model = load_model(model, MODEL_PATH+'/2024-06-27@10-25-41-resnet-60-20-3-val-map-0.5507377203739297-acc-0.65.pth')
+model = load_model(model, MODEL_PATH+'/2024-07-12@14-59-17-resnet-60-20-3-val-map-0.5941339087377404-acc-0.6061728395061728.pth')
 
 model = model.to(device)
 
