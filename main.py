@@ -25,7 +25,7 @@ if MODEL == 'resnet':
         model_dict = torch.load(filename)
         resnet.load_state_dict(model_dict)
 
-    # load_model(MODEL_PATH+'/2024-07-01@09-40-27-resnet-ct-ptinit-accuracy-0.08180712090163934.pth')
+    load_model(MODEL_PATH+'/2024-07-01@09-40-27-resnet-ct-ptinit-accuracy-0.08180712090163934.pth')
 
     last_dim = resnet.fc.weight.shape[1]
     resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
@@ -55,11 +55,11 @@ BATCH_SIZE = 16
 with open(PROCESSED_PATH+'/inputs', 'rb') as f:
     inputs = pickle.load(f)
 
-with open(PROCESSED_PATH+'/outputs', 'rb') as f:
+with open(PROCESSED_PATH+'/votes', 'rb') as f:
     outputs = pickle.load(f)
 
 inputs = torch.tensor(inputs, dtype=torch.uint8)
-outputs = torch.tensor(outputs, dtype=torch.uint8)
+outputs = torch.tensor(outputs, dtype=torch.float32)/3
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, inputs, outputs, transform=None):
@@ -77,8 +77,8 @@ class Dataset(torch.utils.data.Dataset):
         return x, self.outputs[i]
 
 normalize = v2.Normalize(
-    # mean=[0.3736, 0.2172, 0.2071], std=[0.2576, 0.20095, 0.1949]
-    mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]
+    mean=[0.3736, 0.2172, 0.2071], std=[0.2576, 0.20095, 0.1949]
+    # mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]
 )
 
 transform_train = v2.Compose([
@@ -121,17 +121,21 @@ def get_train_val_loader(inputs, outputs):
 
     y_train = y_train.view((train_length*18), 3)
     y_test = y_test.view((test_length*18), 3)
+    print(y_test)
+    y_test[y_test<=0.5] = 0
+    y_test[y_test>0.5] = 1
+    print(y_test)
 
-    freqs = np.array([1/4210, 1/369, 1/547, 1/249, 1/97, 1/17, 1/317, 1/476])
-    # freqs = np.sqrt(freqs)
-    weights = []
-    for label in y_train:
-        num = 4*label[0]+2*label[1]+label[2]
-        weights.append(freqs[num])
+    # # freqs = np.array([1/4210, 1/369, 1/547, 1/249, 1/97, 1/17, 1/317, 1/476])
+    # # # freqs = np.sqrt(freqs)
+    # # weights = []
+    # # for label in y_train:
+    # #     num = 4*label[0]+2*label[1]+label[2]
+    # #     weights.append(freqs[num])
 
-    sampler = torch.utils.data.WeightedRandomSampler(weights=weights, num_samples=480, replacement=True)
+    # # sampler = torch.utils.data.WeightedRandomSampler(weights=weights, num_samples=480, replacement=True)
 
-    print(len(weights), len(X_train))
+    # print(len(weights), len(X_train))
 
     train_dataset = Dataset(X_train, y_train, transform=transform_train)
     test_dataset = Dataset(X_test, y_test, transform=transform_test)
@@ -153,7 +157,7 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn):
         X, y = X.to(device), y.to(device)
         y_pred = model(X)
 
-        loss = loss_fn(y_pred, y.float())
+        loss = loss_fn(torch.nn.functional.sigmoid(y_pred), y)
 
         optimizer.zero_grad()
         loss.backward()
@@ -177,7 +181,7 @@ def save_model(model, val_map, acc, path=MODEL_PATH, identifier=''):
 
 model = model.to(device)
 optimizer = torch.optim.Adam(params=model.parameters(), lr=2e-4)
-loss_fn = torch.nn.BCEWithLogitsLoss()
+loss_fn = torch.nn.MSELoss()
 
 
 overall_labels = np.zeros((len(test_dataloader.dataset), 3), dtype=np.uint8)
