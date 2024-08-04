@@ -14,26 +14,38 @@ import torch.nn as nn
 import numpy as np
 
 
-BATCH_SIZE=256
+BATCH_SIZE=128
 NUM_EPOCHS=24
 GROUP_SIZE=5
 
 with open('./videos/inputs', 'rb') as f:
     inputs = (pickle.load(f))
 
+with open('./videos/endo_inputs', 'rb') as f:
+    endo_inputs = pickle.load(f)
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, transform, group_size):
         self.inputs = torch.tensor(inputs, dtype=torch.uint8)
+        self.endo_inputs = torch.tensor(endo_inputs, dtype=torch.uint8)
+
+        self.cvs_length = len(self.inputs) // group_size
+        self.endo_length = len(self.endo_inputs)
+
         self.transform = transform
         self.group_size = group_size
         assert(90*5%group_size == 0)
 
     def __len__(self):
-        return len(self.inputs)//self.group_size
+        return self.cvs_length+self.endo_length
 
     def __getitem__(self, i):
-        key   = self.inputs[i * self.group_size + np.random.randint(0, self.group_size)]
-        value = self.inputs[i * self.group_size + np.random.randint(0, self.group_size)]
+        if i < self.cvs_length:
+            key   = self.inputs[i * self.group_size + np.random.randint(0, self.group_size)]
+            value = self.inputs[i * self.group_size + np.random.randint(0, self.group_size)]
+        else:
+            key = self.endo_inputs[i-self.cvs_length]
+            value = self.endo_inputs[i-self.cvs_length]
 
         return self.transform(key), self.transform(value)
 
@@ -51,7 +63,8 @@ augmentation = [
     v2.ToPILImage(),
     v2.RandomApply([moco.loader.GaussianBlur([0.1, 2.0])], p=0.5),
     v2.RandomHorizontalFlip(),
-    v2.ToTensor(),
+    v2.ToImage(),
+    v2.ToDtype(torch.bfloat16, scale=True),
     normalize,
 ]
 
@@ -62,12 +75,12 @@ import torchvision.models as models
 
 key_dim=128
 dictionary_size=8192
-device='cuda'
+device='cuda:0'
 
-MODEL = 'resnet'
+MODEL = 'resnext'
 
 if MODEL == 'resnet':
-    resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+    resnet = models.resnet50()
 
     def load_model(model, filename):
         model_dict = torch.load(filename)
@@ -123,7 +136,7 @@ elif MODEL == 'vit':
         nn.Linear(in_features=last_dim, out_features=key_dim)
     )
 
-model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0.07)
+model = moco.builder.MoCo(encoder, dim=key_dim, K=dictionary_size, m=0.9999, T=0.07).type(torch.bfloat16)
 
 # optimizer = torch.optim.Adam(params=[p for p in model.parameters() if p.requires_grad], lr=1e-3)
 optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
@@ -137,7 +150,7 @@ lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
 
 # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=-1)
 
-model= nn.DataParallel(model)
+# model= nn.DataParallel(model)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
@@ -186,13 +199,13 @@ def save_model(model, loss, path=MODEL_PATH, identifier=''):
 for epoch in range(NUM_EPOCHS):
     loss, accuracy = train_one_epoch(model, criterion, optimizer, train_dataloader)
 
-    save_model(encoder, accuracy, MODEL_PATH, MODEL + '+mlp-ct')
+    # save_model(encoder, accuracy, MODEL_PATH, MODEL + '+mlp-ct')
 
-if MODEL == 'resnet':
-    save_model(resnet, accuracy, MODEL_PATH, 'resnet-ct-ptinit')
-elif MODEL == 'vit':
-    save_model(vit, accuracy, MODEL_PATH, 'vit-ct-ptinit')
-elif MODEL == 'resnext':
-    save_model(resnext, accuracy, MODEL_PATH, 'resnext-ct-ptinit')
+    if MODEL == 'resnet':
+        save_model(resnet, accuracy, MODEL_PATH, 'resnet-ct-ptinit')
+    elif MODEL == 'vit':
+        save_model(vit, accuracy, MODEL_PATH, 'vit-ct-ptinit')
+    elif MODEL == 'resnext':
+        save_model(resnext, accuracy, MODEL_PATH, 'resnext-ct-ptinit')
 
 save_model(model, accuracy, MODEL_PATH, MODEL + '-full-model')

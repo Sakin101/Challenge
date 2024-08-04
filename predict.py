@@ -10,10 +10,11 @@ import numpy as np
 import pickle
 
 from paths import TEST_DATA_PATH, TEST_PROCESSED_PATH, MODEL_PATH
+from evaluate import compute_overall_metrics
 
 BATCH_SIZE=32
 NUM_OF_VIDS=100
-device='cpu'
+device='cuda'
 
 videos = sorted(glob.glob(TEST_DATA_PATH + '/videos/*'))
 
@@ -22,7 +23,7 @@ for video in videos:
     print(video)
     vid_indices.append(video[-40:-4])
 
-resnet = models.resnet50()
+resnet = models.resnext101_32x8d()
 
 def load_model(model, filename):
     model_dict = torch.load(filename, map_location=torch.device('cpu'))
@@ -34,13 +35,14 @@ last_dim = resnet.fc.weight.shape[1]
 resnet.fc = torch.nn.Linear(in_features=last_dim, out_features=3)
 
 model = resnet
-model = load_model(model, MODEL_PATH+'/2024-07-12@14-59-17-resnet-60-20-3-val-map-0.5941339087377404-acc-0.6061728395061728.pth')
+model = load_model(model, MODEL_PATH+'/2024-07-21@11-00-16-resnet-60-20-3-val-map-0.5158986404683635-acc-0.7123363965469228.pth')
 
 model = model.to(device)
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, inputs, transform):
+    def __init__(self, inputs, outputs, transform):
         self.inputs = inputs
+        self.outputs = outputs
         self.transform = transform
 
     def __len__(self):
@@ -56,6 +58,9 @@ class Dataset(torch.utils.data.Dataset):
 with open(TEST_PROCESSED_PATH+'/inputs', 'rb') as f:
     inputs = pickle.load(f)
 
+with open(TEST_PROCESSED_PATH+'/outputs', 'rb') as f:
+    outputs = pickle.load(f)
+
 inputs = torch.tensor(inputs, dtype=torch.uint8)
 print(len(inputs))
 
@@ -70,7 +75,7 @@ transform_test = v2.Compose(
     ]
 )
 
-dataset = Dataset(inputs, transform=transform_test)
+dataset = Dataset(inputs, outputs, transform=transform_test)
 
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 
@@ -88,6 +93,11 @@ with torch.no_grad():
 
         j+=X.size(0)
 assert(j == len(dataloader.dataset))
+
+
+print(overall_predictions.shape, outputs.shape)
+metrics = compute_overall_metrics(outputs, overall_predictions.cpu().numpy())
+print(metrics)
 
 overall_predictions = overall_predictions.view(NUM_OF_VIDS, 18, 3)
 
